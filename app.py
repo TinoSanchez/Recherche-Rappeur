@@ -6,46 +6,276 @@ from datetime import datetime
 import lyricsgenius 
 import time
 import urllib.parse 
+import json
+import hashlib
+import os
+import requests # NOUVEAU : Pour récupérer les auditeurs mensuels
+import re # NOUVEAU : Pour chercher le chiffre dans le texte
+import streamlit.components.v1 as components 
 
-# --- CONFIGURATION DE LA PAGE ---
+# --- 1. CONFIGURATION GLOBALE ---
 st.set_page_config(
-    page_title="Rap Data | Fiches Artistes",
-    page_icon="🔥",
+    page_title="RAP DATA | ULTIMATE",
+    page_icon="⚡",
     layout="wide", 
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# --- STYLES CSS ---
+# --- 2. CSS DU FUTUR (DESIGN SPECTACULAIRE) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #0E0E0E; color: white; }
-    h1 { color: #1DB954 !important; font-weight: 800 !important; }
-    div[data-testid="stMetricValue"] { color: #1DB954 !important; font-size: 2rem !important; }
-    div.stButton > button:first-child {
-        background-color: #1DB954; color: white; border-radius: 20px; border: none;
-        padding: 10px 24px; font-weight: bold; transition: all 0.3s ease;
+    /* --- IMPORTS --- */
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;500;900&family=Outfit:wght@300;700&display=swap');
+
+    /* --- BACKGROUND ANIMÉ --- */
+    .stApp {
+        background: radial-gradient(circle at top left, #1a0b2e, #000000);
+        background-image: 
+            radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+            radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
+            radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+        color: white;
+        font-family: 'Outfit', sans-serif;
     }
-    div.stButton > button:first-child:hover { background-color: #1ed760; transform: scale(1.05); }
-    section[data-testid="stSidebar"] { background-color: #121212; }
-    a.genius-link {
-        color: #FFFF64 !important; text-decoration: none; font-size: 0.8em;
-        border: 1px solid #FFFF64; padding: 2px 6px; border-radius: 4px;
+    
+    /* --- TITRES --- */
+    h1 {
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 900 !important;
+        text-transform: uppercase;
+        letter-spacing: -2px;
+        background: linear-gradient(to right, #1DB954, #00d2ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 30px rgba(29, 185, 84, 0.3);
     }
-    a.genius-link:hover { background-color: #FFFF64; color: black !important; }
-    .not-found { color: #ff4b4b; font-size: 0.8em; font-style: italic; }
+    
+    h2, h3 {
+        font-family: 'Montserrat', sans-serif;
+        font-weight: 700 !important;
+        letter-spacing: -1px;
+    }
+
+    /* --- GLASSMORPHISM CARDS --- */
+    .glass-panel {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-radius: 24px;
+        padding: 30px;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .glass-panel:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 30px 60px rgba(29, 185, 84, 0.15);
+        border-color: rgba(29, 185, 84, 0.3);
+    }
+
+    /* --- INPUT RECHERCHE FUTURISTE --- */
+    div[data-testid="stTextInput"] input {
+        background-color: rgba(0,0,0,0.6) !important;
+        color: white !important;
+        border: 2px solid rgba(255,255,255,0.1) !important;
+        border-radius: 50px !important;
+        padding: 20px 30px !important;
+        font-size: 1.2rem !important;
+        transition: all 0.3s ease;
+    }
+    div[data-testid="stTextInput"] input:focus {
+        border-color: #1DB954 !important;
+        box-shadow: 0 0 30px rgba(29, 185, 84, 0.4);
+        background-color: black !important;
+    }
+
+    /* --- BOUTONS NÉONS --- */
+    div.stButton > button {
+        background: linear-gradient(45deg, #1DB954, #00f260);
+        color: black;
+        border-radius: 50px;
+        border: none;
+        padding: 15px 40px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        box-shadow: 0 10px 30px rgba(29, 185, 84, 0.4);
+        transition: all 0.3s ease;
+        width: 100%;
+    }
+    div.stButton > button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 15px 40px rgba(29, 185, 84, 0.6);
+    }
+
+    /* --- VINYLE 3D ANIMÉ --- */
+    .vinyl-wrapper {
+        position: relative;
+        width: 300px;
+        height: 300px;
+        margin: auto;
+        border-radius: 50%;
+        background: #111;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+        animation: spin 20s linear infinite;
+        border: 2px solid #222;
+    }
+    .vinyl-art {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        object-fit: cover;
+        opacity: 1;
+    }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    /* --- TRACKLIST STYLISÉE --- */
+    .track-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 15px;
+        margin-bottom: 8px;
+        background: rgba(255,255,255,0.02);
+        border-radius: 12px;
+        border-left: 3px solid transparent;
+        transition: all 0.2s;
+    }
+    .track-item:hover {
+        background: rgba(255,255,255,0.08);
+        border-left: 3px solid #1DB954;
+        padding-left: 20px;
+    }
+    
+    /* --- LIENS BOUTONS (LOGOS) --- */
+    a.custom-link {
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 0.9rem;
+        padding: 10px 0;
+        border-radius: 15px;
+        transition: 0.3s;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        height: 50px;
+        width: 100%;
+    }
+    .link-spotify { background: rgba(29, 185, 84, 0.15); border: 2px solid #1DB954; color: #1DB954 !important; }
+    .link-spotify:hover { background: #1DB954; box-shadow: 0 0 20px #1DB954; color: black !important; }
+    
+    .link-genius { background: rgba(255, 255, 100, 0.15); border: 2px solid #FFFF64; color: #FFFF64 !important; }
+    .link-genius:hover { background: #FFFF64; box-shadow: 0 0 20px #FFFF64; color: black !important; }
+
+    .link-fnac { background: rgba(225, 168, 45, 0.15); border: 2px solid #E1A82D; color: #E1A82D !important; }
+    .link-fnac:hover { background: #E1A82D; box-shadow: 0 0 20px #E1A82D; color: black !important; }
+
+    .link-snep { background: rgba(255, 215, 0, 0.15); border: 2px solid #FFD700; color: #FFD700 !important; }
+    .link-snep:hover { background: #FFD700; box-shadow: 0 0 20px #FFD700; color: black !important; }
+
+    /* Petits boutons liste */
+    a.mini-btn {
+        text-decoration: none; font-size: 0.7rem; padding: 3px 8px;
+        border-radius: 4px; margin-left: 5px; transition: 0.2s; font-weight: bold;
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+    a.btn-lyrics { background: #FFFF64; color: black !important; }
+    a.btn-play { background: #1DB954; color: white !important; }
+    a.mini-btn:hover { transform: scale(1.1); }
+
+    /* --- SIDEBAR --- */
+    section[data-testid="stSidebar"] {
+        background-color: #050505;
+        border-right: 1px solid #222;
+    }
+    
+    /* HIDE DEFAULTS */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTION DE L'ÉTAT ---
-if 'history' not in st.session_state: st.session_state.history = []
-if 'search_result' not in st.session_state: st.session_state.search_result = None
-
-# --- CLÉS API (⚠️ TES CLÉS ICI) ---
+# ==============================================================================
+# CONFIGURATION & AUTHENTIFICATION
+# ==============================================================================
+USER_DB_FILE = "users_db.json"
 SPOTIPY_CLIENT_ID = '797ca964aaeb4a93afd012b639e79d03'
 SPOTIPY_CLIENT_SECRET = '4d8484cc53cc43aeb32610151a36594f'
 GENIUS_ACCESS_TOKEN = 'VOTRE_TOKEN_GENIUS_ICI' 
 
-# --- INITIALISATION ---
+def hash_password(password): return hashlib.sha256(password.encode()).hexdigest()
+
+def load_users():
+    if not os.path.exists(USER_DB_FILE):
+        default_users = {"admin": hash_password("rapfr")}
+        save_users(default_users)
+        return default_users
+    try: 
+        with open(USER_DB_FILE, "r") as f: return json.load(f)
+    except: return {}
+
+def save_users(users):
+    with open(USER_DB_FILE, "w") as f: json.dump(users, f)
+
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'current_user' not in st.session_state: st.session_state.current_user = ""
+if 'history' not in st.session_state: st.session_state.history = []
+if 'search_result' not in st.session_state: st.session_state.search_result = None
+
+# --- PAGE DE CONNEXION ---
+def login_page():
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 1.5, 1])
+    with c2:
+        st.markdown("""
+        <div class="glass-panel" style="text-align:center;">
+            <h1 style="font-size: 4rem; margin-bottom:0;">ACCESS</h1>
+            <p style="color: #888; letter-spacing: 3px; margin-bottom: 30px;">SECURE RAP DATABASE</p>
+        </div>
+        <br>
+        """, unsafe_allow_html=True)
+        
+        tab_login, tab_signup = st.tabs(["LOGIN", "REGISTER"])
+        users = load_users()
+        
+        with tab_login:
+            u = st.text_input("IDENTIFIANT", key="log_u")
+            p = st.text_input("MOT DE PASSE", type="password", key="log_p")
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("INITIALISER LE SYSTÈME", use_container_width=True):
+                if u in users and users[u] == hash_password(p):
+                    st.session_state.logged_in = True
+                    st.session_state.current_user = u
+                    st.rerun()
+                else: st.error("ACCÈS REFUSÉ")
+                
+        with tab_signup:
+            nu = st.text_input("NOUVEL ID", key="sign_u")
+            np = st.text_input("NOUVEAU MDP", type="password", key="sign_p")
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("CRÉER L'ACCÈS", use_container_width=True):
+                if nu in users: st.error("ID DÉJÀ PRIS")
+                elif len(np) < 4: st.error("TROP COURT")
+                else:
+                    users[nu] = hash_password(np)
+                    save_users(users)
+                    st.success("ACCÈS CRÉÉ")
+        
+        st.markdown("<br><hr style='border-color:rgba(255,255,255,0.1);'><br>", unsafe_allow_html=True)
+        if st.button("👀 ACCÈS VISITEUR (SANS COMPTE)", use_container_width=True):
+            st.session_state.logged_in = True
+            st.session_state.current_user = "Visiteur"
+            st.rerun()
+
+def logout():
+    st.session_state.logged_in = False; st.session_state.current_user = ""; st.rerun()
+
+if not st.session_state.logged_in: login_page(); st.stop()
+
+# ==============================================================================
+# LOGIQUE APP
+# ==============================================================================
 @st.cache_resource 
 def init_apis():
     auth_manager = SpotifyClientCredentials(client_id=SPOTIPY_CLIENT_ID, client_secret=SPOTIPY_CLIENT_SECRET)
@@ -56,7 +286,6 @@ def init_apis():
 
 sp, genius = init_apis()
 
-# --- UTILITAIRES ---
 def safe_get(dct, path, default=""):
     try:
         for p in path.split("/"):
@@ -65,226 +294,235 @@ def safe_get(dct, path, default=""):
         return dct
     except: return default
 
-# --- RÉCUPÉRATION DES DONNÉES ---
-@st.cache_data(show_spinner=False)
-def get_artist_data(nom_rappeur_saisi):
-    # 1. Recherche Spotify
+# --- FONCTION POUR SCRAPER LES AUDITEURS MENSUELS ---
+def scrape_monthly_listeners(artist_url):
     try:
-        results = sp.search(q=f'artist:{nom_rappeur_saisi}', type='artist', limit=10)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        response = requests.get(artist_url, headers=headers)
+        if response.status_code == 200:
+            # On cherche le pattern "X monthly listeners" dans le code source
+            # Ex: "Artist · 8.3M monthly listeners"
+            match = re.search(r'Artist\s·\s([\d\.,]+[MK]?)\smonthly\slisteners', response.text)
+            if match:
+                return match.group(1)
+    except:
+        return "N/A"
+    return "N/A"
+
+@st.cache_data(show_spinner=False)
+def get_artist_data(nom):
+    try:
+        results = sp.search(q=f'artist:{nom}', type='artist', limit=10)
         items = results['artists']['items']
-    except Exception as e:
-        return None, None, f"Erreur Spotify : {e}"
+    except Exception as e: return None, None, f"Erreur API : {e}"
 
-    if not items:
-        return None, None, "Artiste non trouvé."
+    if not items: return None, None, "Artiste introuvable."
 
-    # --- FILTRAGE STRICT ---
     valid_items = []
-    geo_keywords = ['french', 'francais', 'français', 'francoton', 'belge', 'belgian', 'suisse', 'swiss']
-    style_keywords = ['rap', 'hip hop', 'trap', 'drill', 'urbaine', 'urban', 'r&b', 'cloud']
-
+    keywords = ['french', 'francais', 'belge', 'suisse', 'rap', 'hip hop', 'urbaine', 'drill']
     for item in items:
-        genres_str = " ".join([g.lower() for g in item.get('genres', [])])
-        has_geo = any(k in genres_str for k in geo_keywords)
-        has_style = any(k in genres_str for k in style_keywords)
-        if has_geo and has_style:
-            valid_items.append(item)
+        g = " ".join([x.lower() for x in item.get('genres', [])])
+        if any(k in g for k in keywords): valid_items.append(item)
     
-    if not valid_items:
-        return None, None, f"🚫 Artiste trouvé, mais identifié comme non-Français ou non-Rap."
-
-    # Sélection
+    if not valid_items: return None, None, "Cet artiste ne correspond pas aux critères Rap FR."
+    
     valid_items.sort(key=lambda x: x.get('popularity', 0), reverse=True)
     artist = valid_items[0]
-    artist_name_trouve = artist.get('name', nom_rappeur_saisi)
-
-    # Construction du lien Genius par défaut
-    formatted_name = urllib.parse.quote(artist_name_trouve.replace(" ", "-").capitalize())
-    default_genius_url = f"https://genius.com/artists/{formatted_name}"
-
+    
+    formatted_name = urllib.parse.quote(artist['name'].replace(" ", "-").capitalize())
+    
     data = {
-        "name": artist_name_trouve,
+        "name": artist['name'],
         "id": artist['id'],
         "img_url": safe_get(artist, "images/0/url", ""),
         "followers": artist.get('followers', {}).get('total', 0),
         "popularity": artist.get('popularity', 0),
         "genres": artist.get('genres', []),
-        "spotify_url": safe_get(artist, "external_urls/spotify", "N/A"),
-        "bio": "Description non disponible.",
-        "genius_url": default_genius_url,
-        "wiki_url": "Non trouvé"
+        "spotify_url": safe_get(artist, "external_urls/spotify", "#"),
+        "bio": "Bio indisponible.",
+        "genius_url": f"https://genius.com/artists/{formatted_name}",
+        "monthly_listeners": "N/A" # Placeholder
     }
 
-    # 2. Genius (API)
+    # SCRAPING AUDITEURS MENSUELS
+    data["monthly_listeners"] = scrape_monthly_listeners(data["spotify_url"])
+
     try:
-        genius_artist = genius.search_artist(data["name"], max_songs=0, sort="popularity")
-        if genius_artist: data["genius_url"] = genius_artist.url
+        wiki_res = wikipedia.search(data["name"], results=1)
+        if wiki_res:
+            page = wikipedia.page(wiki_res[0], auto_suggest=False)
+            data["bio"] = page.summary[:800] + "..."
     except: pass
-    
-    # 3. Wikipédia (VERSION CORRIGÉE ET ROBUSTE)
+
     try:
-        # Étape A : On cherche une liste de pages potentielles
-        search_results = wikipedia.search(data["name"], results=3)
-        
-        found_page = None
-        # Mots-clés pour vérifier qu'on est sur la bonne page
-        keywords = ["rappeur", "groupe", "hip-hop", "musique", "chanteur", "slam"]
-        
-        # Étape B : On teste les résultats un par un
-        for res in search_results:
-            try:
-                # auto_suggest=False est crucial pour éviter que wiki devine mal
-                page = wikipedia.page(res, auto_suggest=False)
-                summary = page.summary.lower()
-                
-                # Vérifie si un mot clé est dans le résumé
-                if any(k in summary for k in keywords):
-                    data["bio"] = page.summary[:1000] + "..." # On coupe si trop long
-                    data["wiki_url"] = page.url
-                    found_page = True
-                    break # On a trouvé, on arrête de chercher
-            except (wikipedia.DisambiguationError, wikipedia.PageError):
-                continue # Si erreur sur cette page, on teste la suivante
-                
-    except Exception as e:
-        print(f"Erreur Wiki Globale: {e}")
-
-    # 4. Discographie Spotify
-    try:
-        albums_list = sp.artist_albums(data["id"], album_type='album', country='FR', limit=50)['items']
-    except: albums_list = []
-
-    albums_dict = {}
-    for album in albums_list:
-        if album['name'] not in albums_dict or album['release_date'] > albums_dict[album['name']]['release_date']:
-            albums_dict[album['name']] = album
+        albums = sp.artist_albums(data["id"], album_type='album', country='FR', limit=50)['items']
+    except: albums = []
     
-    data["albums"] = sorted(albums_dict.values(), key=lambda x: x['release_date'], reverse=True)
+    unique_albums = {}
+    for a in albums:
+        if a['name'] not in unique_albums: unique_albums[a['name']] = a
     
-    return data, artist_name_trouve, None
+    data["albums"] = sorted(unique_albums.values(), key=lambda x: x['release_date'], reverse=True)
+    return data, artist['name'], None
 
-def generate_text_content(data):
-    content = f"RAP DATA REPORT : {data['name'].upper()}\n"
-    content += f"Généré le : {datetime.now().strftime('%d/%m/%Y')}\n"
-    content += "="*50 + "\n\n"
-    content += f"POPULARITÉ : {data['popularity']}/100\n"
-    content += f"FOLLOWERS  : {data['followers']:,}\n\n"
-    content += f"BIO :\n{data['bio']}\n\n"
-    content += "="*50 + "\nDISCOGRAPHIE (Récents en premier)\n" + "="*50 + "\n"
-
-    for album in data["albums"]:
-        try:
-            content += f"\n[ALBUM] {album['name']} ({album['release_date']})\n"
-            tracks = sp.album_tracks(album["id"])["items"]
-            for track in tracks:
-                query = f"{track['name']} {data['name']}"
-                encoded_query = urllib.parse.quote(query)
-                genius_link = f"https://genius.com/search?q={encoded_query}"
-                content += f"   - {track['track_number']}. {track['name']} (Genius: {genius_link})\n"
-        except: continue
-    return content
-
-# --- LOGIQUE ---
 def do_search():
-    user_input = st.session_state.rappeur_input_key
-    if user_input:
-        with st.spinner(f"🎧 Analyse de {user_input} en cours..."):
-            data, artist_trouve, error = get_artist_data(user_input)
-            st.session_state.search_result = {'data': data, 'artist_trouve': artist_trouve, 'error': error, 'input': user_input}
-            if not error:
-                new_item = {'name': data['name'], 'time': datetime.now().strftime("%H:%M")}
-                if not st.session_state.history or st.session_state.history[-1]['name'] != data['name']:
-                    st.session_state.history.append(new_item)
+    if st.session_state.rappeur_input_key:
+        with st.spinner("Loading Data..."):
+            data, name, err = get_artist_data(st.session_state.rappeur_input_key)
+            st.session_state.search_result = {'data': data, 'error': err}
+            if not err:
+                if not st.session_state.history or st.session_state.history[-1] != name:
+                    st.session_state.history.append(name)
 
-def recall_history(name):
+def recall(name):
     st.session_state.rappeur_input_key = name
     do_search()
 
-# --- SIDEBAR ---
+# ==============================================================================
+# INTERFACE PRINCIPALE
+# ==============================================================================
+
+# SIDEBAR
 with st.sidebar:
-    st.header("🕒 Historique")
-    if st.session_state.history:
-        for i, item in enumerate(reversed(st.session_state.history[-10:])): 
-            st.button(f"🎵 {item['name']}", key=f"hist_{i}", on_click=recall_history, args=[item['name']], use_container_width=True)
-        st.markdown("---")
-        if st.button("🗑️ Effacer tout", key="clean"):
-            st.session_state.history = []
-            st.rerun()
-    else: st.caption("Vos recherches apparaîtront ici.")
+    st.markdown(f"<h3 style='text-align:center;'>👤 {st.session_state.current_user.upper()}</h3>", unsafe_allow_html=True)
+    st.button("LOGOUT", on_click=logout, use_container_width=True)
+    st.markdown("---")
+    st.markdown("### RECENT DIGS")
+    for h in reversed(st.session_state.history[-5:]):
+        st.button(f"💿 {h}", key=f"h_{h}", on_click=recall, args=[h], use_container_width=True)
 
-# --- MAIN ---
-st.title("🔥 Rap Data Generator (FR Only)")
-st.markdown("### L'outil ultime pour analyser le Rap Français")
+# HEADER
+st.markdown("""
+<div style="text-align:center; margin-bottom: 50px;">
+    <h1 style="font-size: 5rem; margin-bottom: 0; line-height: 1;">RAP DATA</h1>
+    <p style="font-size: 1.2rem; color: #00d2ff; letter-spacing: 5px; text-transform: uppercase;">Ultimate Database</p>
+</div>
+""", unsafe_allow_html=True)
 
-col_search, col_btn = st.columns([4, 1])
-with col_search:
-    st.text_input("Entrez un nom d'artiste", placeholder="Ex: Ninho, Gazo...", key="rappeur_input_key", label_visibility="collapsed", on_change=do_search)
-with col_btn:
-    st.button("Analyser 🚀", on_click=do_search, use_container_width=True)
+# SEARCH BAR
+col1, col2 = st.columns([4, 1])
+with col1:
+    st.text_input("SEARCH ARTIST", key="rappeur_input_key", on_change=do_search, placeholder="Ex: Booba, Gazo...")
+with col2:
+    st.button("GO", on_click=do_search, use_container_width=True)
 
+# RESULTATS
 if st.session_state.search_result:
     res = st.session_state.search_result
     if res['error']:
         st.error(res['error'])
     else:
-        data = res['data']
-        if res['input'].lower().strip() != res['artist_trouve'].lower().strip():
-            st.toast(f"Correction : {res['input']} → {res['artist_trouve']}", icon="✨")
-        else: st.toast("Rappeur français identifié !", icon="🇫🇷")
-
-        hero_col1, hero_col2 = st.columns([1, 2.5], gap="large")
-        with hero_col1:
-            if data['img_url']: st.image(data['img_url'], use_container_width=True)
-            if data['genres']: st.markdown("**Genres :** " + ", ".join([f"`{g}`" for g in data['genres'][:3]]))
-        with hero_col2:
-            st.title(data['name'])
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Popularité", f"{data['popularity']}/100")
-            m2.metric("Followers", f"{data['followers']:,}".replace(",", " "))
-            m3.metric("Albums", len(data['albums']))
+        d = res['data']
+        
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        
+        # --- HERO SECTION ---
+        c_img, c_info = st.columns([1, 2], gap="large")
+        
+        with c_img:
+            st.markdown(f"""
+            <div class="vinyl-wrapper">
+                <img src="{d['img_url']}" class="vinyl-art">
+            </div>
+            """, unsafe_allow_html=True)
             
-            # Affichage de la Bio avec fallback si vide
-            bio_text = data['bio'] if len(data['bio']) > 20 else "Biographie non disponible sur Wikipédia."
-            st.markdown(f"_{bio_text}_")
-            
-            st.markdown("---")
-            l1, l2, l3, l4 = st.columns(4)
-            l1.link_button("💚 Spotify", data['spotify_url'])
-            l2.link_button("🟡 Genius", data['genius_url']) 
-            l3.link_button("🎟️ Concerts", f"https://www.google.com/search?q=concert+{data['name'].replace(' ', '+')}")
-            l4.link_button("📀 Certifs", f"https://snepmusique.com/les-certifications/?interprete={data['name'].replace(' ', '+')}")
+        with c_info:
+            st.markdown(f"""
+            <div class="glass-panel">
+                <h1 style="font-size: 4rem; margin:0; background: linear-gradient(to right, #fff, #888); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{d['name']}</h1>
+                <p style="color: #1DB954; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; margin-top:-10px;">
+                    {", ".join(d['genres'][:3])}
+                </p>
+                <div style="display:flex; gap:20px; margin-top:20px;">
+                    <div>
+                        <h3 style="margin:0; color:#fff;">{d['popularity']}</h3>
+                        <p style="color:#666; font-size:0.8rem;">POPULARITÉ</p>
+                    </div>
+                    <div style="border-left:1px solid #333; padding-left:20px;">
+                        <h3 style="margin:0; color:#fff;">{d['followers']:,}</h3>
+                        <p style="color:#666; font-size:0.8rem;">ABONNÉS</p>
+                    </div>
+                    <div style="border-left:1px solid #333; padding-left:20px;">
+                        <h3 style="margin:0; color:#fff;">{d['monthly_listeners']}</h3>
+                        <p style="color:#666; font-size:0.8rem;">AUDITEURS/MOIS</p>
+                    </div>
+                    <div style="border-left:1px solid #333; padding-left:20px;">
+                        <h3 style="margin:0; color:#fff;">{len(d['albums'])}</h3>
+                        <p style="color:#666; font-size:0.8rem;">ALBUMS</p>
+                    </div>
+                </div>
+                <br>
+                <p style="color: #ccc; line-height: 1.6; font-size: 0.95rem;">{d['bio']}</p>
+                <br>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <a href="{d['spotify_url']}" target="_blank" class="custom-link link-spotify">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/1/19/Spotify_logo_without_text.svg" width="24"> Spotify
+                    </a>
+                    <a href="{d['genius_url']}" target="_blank" class="custom-link link-genius">
+                        🟡 Genius
+                    </a>
+                    <a href="https://www.fnacspectacles.com/artist/{d['name'].replace(' ', '-').lower()}" target="_blank" class="custom-link link-fnac">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/2/2e/Fnac_Logo.svg" width="24"> Fnac
+                    </a>
+                    <a href="https://snepmusique.com/les-certifications/?interprete={d['name'].replace(' ', '+')}" target="_blank" class="custom-link link-snep">
+                        📀 Disques
+                    </a>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        st.markdown("###")
-        tab1, tab2 = st.tabs(["💿 Discographie Détaillée", "📥 Exporter"])
-        with tab1:
-            if not data['albums']: st.info("Aucun album trouvé.")
-            else:
-                st.markdown("Cliquez pour voir les titres et **paroles**.")
-                for album in data['albums']:
-                    with st.expander(f"📅 {album['release_date'][:4]} - **{album['name']}**"):
-                        c1, c2 = st.columns([1, 4])
-                        with c1:
-                            if len(album['images']) > 0: st.image(album['images'][1]['url'], width=100)
-                        with c2:
-                            try:
-                                tracks = sp.album_tracks(album["id"])["items"]
-                                for track in tracks:
-                                    track_name = track['name']
-                                    if track_name:
-                                        search_query = f"{track_name} {data['name']}"
-                                        encoded_query = urllib.parse.quote(search_query)
-                                        genius_link = f"https://genius.com/search?q={encoded_query}"
-                                        st.markdown(
-                                            f"{track['track_number']}. **{track_name}** "
-                                            f"<a href=\"{genius_link}\" target=\"_blank\" class=\"genius-link\">🟡 Paroles</a>", 
-                                            unsafe_allow_html=True
-                                        )
-                                    else:
-                                         st.markdown(f"{track['track_number']}. Titre Inconnu <span class='not-found'>❌ Paroles non trouvées</span>", unsafe_allow_html=True)
-                            except: st.error("Erreur chargement titres")
-        with tab2:
-            txt = generate_text_content(data)
-            st.download_button(f"📄 Télécharger Fiche {data['name']}", txt, f"{data['name']}.txt", "text/plain", use_container_width=True)
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<h2>DISCOGRAPHIE</h2>", unsafe_allow_html=True)
+        
+        if not d['albums']:
+            st.warning("Aucun album trouvé.")
+        else:
+            for album in d['albums']:
+                with st.expander(f"{album['name']} ({album['release_date'][:4]})"):
+                    c_alb_img, c_alb_tracks = st.columns([1, 3])
+                    
+                    with c_alb_img:
+                        if len(album['images']) > 0:
+                            st.image(album['images'][0]['url'], use_container_width=True)
+                            st.caption("Cover Art")
+                    
+                    with c_alb_tracks:
+                        components.iframe(f"https://open.spotify.com/embed/album/{album['id']}?theme=0", height=80)
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        try:
+                            tracks = sp.album_tracks(album["id"])["items"]
+                            for t in tracks:
+                                if t['name']:
+                                    q = urllib.parse.quote(f"{t['name']} {d['name']}")
+                                    gl = f"https://genius.com/search?q={q}"
+                                    tl = safe_get(t, 'external_urls/spotify', '#')
+                                    
+                                    # LISTE DES TITRES PROPRE ET TRONQUÉE
+                                    st.markdown(f"""
+                                    <div class="track-row">
+                                        <div class="track-info">
+                                            <span class="track-number">{t['track_number']}.</span>
+                                            <span class="track-title" title="{t['name']}">{t['name']}</span>
+                                        </div>
+                                        <div style="display:flex;">
+                                            <a href="{gl}" target="_blank" class="mini-btn btn-lyrics">Paroles</a>
+                                            <a href="{tl}" target="_blank" class="mini-btn btn-play">▶</a>
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                        except: st.error("Info titres indisponible")
 
-st.markdown("---")
-st.markdown("<center style='color: grey;'>Développé avec ❤️ avec Fevrie, Betastar et Raitro</center>", unsafe_allow_html=True)
+def generate_text_content(data):
+    content = f"RAP DATA : {data['name'].upper()}\n{'='*30}\n"
+    content += f"Popularité: {data['popularity']}/100 | Followers: {data['followers']:,}\n\nBIO:\n{data['bio']}\n\nDISCOGRAPHIE:\n"
+    for album in data["albums"]:
+        content += f"\n[{album['release_date']}] {album['name']}\n"
+        try:
+            tracks = sp.album_tracks(album["id"])["items"]
+            for t in tracks:
+                q = urllib.parse.quote(f"{t['name']} {data['name']}")
+                content += f" - {t['name']} (https://genius.com/search?q={q})\n"
+        except: continue
+    return content
+
+st.markdown("<br><br><br><center style='color:#333; font-size:0.8rem; letter-spacing:2px;'>DESIGNED BY FEVRIE, BETASTAR & RAITRO</center>", unsafe_allow_html=True)
