@@ -6,13 +6,14 @@ from datetime import datetime
 import io
 
 # --- GESTION DE L'ÉTAT (SESSION STATE) ---
-# Initialisation de la variable 'history' si elle n'existe pas.
 if 'history' not in st.session_state:
     st.session_state.history = []
+if 'search_term' not in st.session_state:
+    st.session_state.search_term = ""
 
 # --- CONFIGURATION ---
 # ⚠️ ATTENTION : Vos clés sont visibles ici. Ne partagez pas ce fichier publiquement.
-SPOTIPY_CLIENT_ID = '797ca964aaeb4a93afd012b639e79d03' 
+SPOTIPY_CLIENT_ID = '797ca964aaeb4a93afd012b639e79d03'
 SPOTIPY_CLIENT_SECRET = '4d8484cc53cc43aeb32610151a36594f'
 
 # Configuration des APIs
@@ -34,8 +35,7 @@ def safe_get(dct, path, default=""):
 
 def get_artist_data(nom_rappeur_saisi):
     """
-    Récupère les données et retourne un dictionnaire complet + le nom de l'artiste trouvé
-    (pour vérifier si une correction a eu lieu).
+    Récupère les données et retourne un dictionnaire complet + le nom de l'artiste trouvé.
     """
     
     # 1. Recherche Spotify
@@ -85,7 +85,8 @@ def get_artist_data(nom_rappeur_saisi):
         if album['name'] not in albums_dict or album['release_date'] > albums_dict[album['name']]['release_date']:
             albums_dict[album['name']] = album
     
-    data["albums"] = sorted(albums_dict.values(), key=lambda x: x['release_date'])
+    # MODIFICATION CLÉ ICI : reverse=True trie du plus récent au plus ancien
+    data["albums"] = sorted(albums_dict.values(), key=lambda x: x['release_date'], reverse=True)
     
     return data, artist_name_trouve, None
 
@@ -113,6 +114,7 @@ Lien Photo         : {data['img_url']}
 
 ================================================================================
 DISCOGRAPHIE (Albums Studio)
+(Du plus récent au plus ancien)
 ================================================================================
 """
     for album in data["albums"]:
@@ -132,6 +134,97 @@ DISCOGRAPHIE (Albums Studio)
     content += "\nFIN DU RAPPORT"
     return content
 
+# --- FONCTION DE RECHERCHE PRINCIPALE ---
+def do_search():
+    """
+    Exécute la recherche principale en utilisant la valeur stockée
+    dans st.session_state.rappeur_input_key.
+    """
+    # On récupère la valeur du champ de texte stockée par la clé 'rappeur_input_key'
+    rappeur_input = st.session_state.rappeur_input_key
+    
+    if rappeur_input:
+        with st.spinner(f"Recherche d'infos pour le nom saisi : **{rappeur_input}**..."):
+            
+            data, artist_trouve, error = get_artist_data(rappeur_input)
+            
+            # Stocke les résultats dans session_state pour qu'ils soient affichés
+            st.session_state.search_result = {
+                'data': data,
+                'artist_trouve': artist_trouve,
+                'error': error,
+                'input': rappeur_input
+            }
+        
+# --- GESTION DE L'AFFICHAGE DE LA RECHERCHE ---
+def display_search_results():
+    """Affiche les résultats si une recherche a été effectuée."""
+    if 'search_result' not in st.session_state:
+        return
+
+    result = st.session_state.search_result
+    data = result['data']
+    artist_trouve = result['artist_trouve']
+    rappeur_input = result['input']
+    error = result['error']
+    
+    if error:
+        st.error(error)
+    else:
+        # --- GESTION DE L'HISTORIQUE (Ajout de l'artiste) ---
+        new_entry = {
+            'name': data['name'],
+            'url': data['spotify_url'],
+            'time': datetime.now().strftime("%H:%M:%S")
+        }
+        
+        if not st.session_state.history or st.session_state.history[-1]['name'] != data['name']:
+            st.session_state.history.append(new_entry)
+            st.rerun() 
+        
+        # --- VÉRIFICATION DE LA CORRECTION ---
+        if rappeur_input.lower().strip() != artist_trouve.lower().strip():
+            st.success(f"✅ Nom corrigé ! Nous avons trouvé : **{artist_trouve}**.")
+
+        # --- AFFICHAGE VISUEL ---
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            if data["img_url"]:
+                st.image(data["img_url"], caption=data["name"])
+            else:
+                st.warning("Pas d'image trouvée")
+        
+        with col2:
+            st.header(data["name"])
+            st.metric("Popularité Spotify", f"{data['popularity']}/100")
+            st.metric("Abonnés", f"{data['followers']:,}")
+            st.info(data["bio"])
+            
+            st.markdown(f"[🎵 Écouter sur Spotify]({data['spotify_url']}) | [📖 Wikipédia]({data['wiki_url']})")
+            st.markdown(f"[🎟️ Billetterie](https://www.google.com/search?q=concert+billetterie+{data['name'].replace(' ', '+')}) | [📀 Certifications](https://snepmusique.com/les-certifications/?interprete={data['name'].replace(' ', '+')})")
+
+        st.divider()
+        st.subheader("💿 Discographie détectée (Du plus récent au plus ancien)")
+        
+        # On génère le texte en arrière-plan pour le téléchargement
+        text_report = generate_text_content(data)
+        
+        # Bouton de téléchargement
+        file_name = f"{data['name'].replace(' ', '_')}.txt"
+        st.download_button(
+            label="📥 Télécharger la Fiche (Format Texte)",
+            data=text_report,
+            file_name=file_name,
+            mime="text/plain"
+        )
+
+        # Aperçu des albums
+        for album in data["albums"]:
+            with st.expander(f"📅 {album['release_date']} - {album['name']}"):
+                st.write(f"Lien : {safe_get(album, 'external_urls/spotify', '')}")
+                st.caption("Les titres sont inclus dans le fichier téléchargé.")
+
 # --- INTERFACE STREAMLIT ---
 st.set_page_config(page_title="Générateur Fiche Rappeur", page_icon="🎤")
 
@@ -149,80 +242,23 @@ if st.session_state.history:
     # Bouton pour effacer l'historique
     if st.sidebar.button("Effacer l'historique"):
         st.session_state.history = []
-        # st.experimental_rerun() force l'application à se rafraîchir pour que la liste vide s'affiche
-        st.experimental_rerun() 
+        st.rerun() 
 else:
     st.sidebar.info("Aucune recherche récente.")
 
 # --- CORPS DE L'APPLICATION ---
 
-# Champ de recherche
-rappeur_input = st.text_input("Nom de l'artiste", placeholder="Ex: Ninho, Booba, Tiakola...")
+# Champ de recherche. L'appui sur Entrée exécute do_search() via on_change
+rappeur_input = st.text_input(
+    "Nom de l'artiste", 
+    placeholder="Ex: Ninho, Booba, Tiakola...",
+    key='rappeur_input_key',
+    on_change=do_search
+)
 
+# Le bouton appelle la même fonction do_search()
 if st.button("Lancer la recherche 🚀"):
-    if rappeur_input:
-        with st.spinner(f"Recherche d'infos pour le nom saisi : **{rappeur_input}**..."):
-            
-            data, artist_trouve, error = get_artist_data(rappeur_input)
-            
-            if error:
-                st.error(error)
-            else:
-                # --- GESTION DE L'HISTORIQUE (Ajout de l'artiste) ---
-                # Ajout de l'artiste à l'historique si ce n'est pas déjà le dernier élément
-                new_entry = {
-                    'name': data['name'],
-                    'url': data['spotify_url'],
-                    'time': datetime.now().strftime("%H:%M:%S")
-                }
-                
-                # Vérifie si la dernière entrée est différente de la nouvelle pour éviter les doublons instantanés
-                if not st.session_state.history or st.session_state.history[-1]['name'] != data['name']:
-                    st.session_state.history.append(new_entry)
-                    st.experimental_rerun() # Rafraîchit la sidebar pour montrer la nouvelle entrée
-                
-                # --- VÉRIFICATION DE LA CORRECTION ---
-                if rappeur_input.lower().strip() != artist_trouve.lower().strip():
-                    st.success(f"✅ Nom corrigé ! Nous avons trouvé : **{artist_trouve}**.")
+    do_search()
 
-                # --- AFFICHAGE VISUEL ---
-                col1, col2 = st.columns([1, 2])
-                
-                with col1:
-                    if data["img_url"]:
-                        st.image(data["img_url"], caption=data["name"])
-                    else:
-                        st.warning("Pas d'image trouvée")
-                
-                with col2:
-                    st.header(data["name"])
-                    st.metric("Popularité Spotify", f"{data['popularity']}/100")
-                    st.metric("Abonnés", f"{data['followers']:,}")
-                    st.info(data["bio"])
-                    
-                    st.markdown(f"[🎵 Écouter sur Spotify]({data['spotify_url']}) | [📖 Wikipédia]({data['wiki_url']})")
-                    st.markdown(f"[🎟️ Billetterie](https://www.google.com/search?q=concert+billetterie+{data['name'].replace(' ', '+')}) | [📀 Certifications](https://snepmusique.com/les-certifications/?interprete={data['name'].replace(' ', '+')})")
-
-                st.divider()
-                st.subheader("💿 Discographie détectée")
-                
-                # On génère le texte en arrière-plan pour le téléchargement
-                text_report = generate_text_content(data)
-                
-                # Bouton de téléchargement
-                file_name = f"{data['name'].replace(' ', '_')}.txt"
-                st.download_button(
-                    label="📥 Télécharger la Fiche (Format Texte)",
-                    data=text_report,
-                    file_name=file_name,
-                    mime="text/plain"
-                )
-
-                # Aperçu des albums
-                for album in data["albums"]:
-                    with st.expander(f"📅 {album['release_date']} - {album['name']}"):
-                        st.write(f"Lien : {safe_get(album, 'external_urls/spotify', '')}")
-                        st.caption("Les titres sont inclus dans le fichier téléchargé.")
-
-    else:
-        st.warning("Veuillez entrer un nom.")
+# Affiche les résultats si ils existent
+display_search_results()
